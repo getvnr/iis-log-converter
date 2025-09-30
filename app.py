@@ -4,59 +4,75 @@ from io import BytesIO
 import datetime
 import re
 
+# Ensure openpyxl is available
+try:
+    import openpyxl
+except ImportError:
+    st.error("The 'openpyxl' library is not installed. Please ensure it is included in your environment (e.g., via requirements.txt).")
+    st.stop()
+
 def parse_iis_log(file_content):
-    lines = file_content.decode('utf-8').splitlines()
-    fields = None
-    data = []
-    
-    for line in lines:
-        if line.startswith('#'):
-            if line.startswith('#Fields:'):
-                fields = line.split()[1:]
-            continue
-        if fields and line.strip():
-            row = line.split()
-            if len(row) == len(fields):
-                data.append(row)
-    
-    if not fields or not data:
-        raise ValueError("Invalid IIS log format")
-    
-    df = pd.DataFrame(data, columns=fields)
-    
-    # Convert relevant columns to numeric
-    numeric_cols = ['s-port', 'sc-status', 'sc-substatus', 'sc-win32-status', 'sc-bytes', 'cs-bytes', 'time-taken']
-    for col in numeric_cols:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
-    
-    # Combine date and time into datetime if present
-    if 'date' in df.columns and 'time' in df.columns:
-        df['datetime'] = pd.to_datetime(df['date'] + ' ' + df['time'], errors='coerce')
-    
-    return df
+    try:
+        lines = file_content.decode('utf-8', errors='ignore').splitlines()
+        fields = None
+        data = []
+        
+        for line in lines:
+            if line.startswith('#'):
+                if line.startswith('#Fields:'):
+                    fields = line.split()[1:]
+                continue
+            if fields and line.strip():
+                row = line.split()
+                if len(row) == len(fields):
+                    data.append(row)
+        
+        if not fields or not data:
+            raise ValueError("Invalid IIS log format or no data found")
+        
+        df = pd.DataFrame(data, columns=fields)
+        
+        # Convert relevant columns to numeric
+        numeric_cols = ['s-port', 'sc-status', 'sc-substatus', 'sc-win32-status', 'sc-bytes', 'cs-bytes', 'time-taken']
+        for col in numeric_cols:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        
+        # Combine date and time into datetime if present
+        if 'date' in df.columns and 'time' in df.columns:
+            df['datetime'] = pd.to_datetime(df['date'] + ' ' + df['time'], errors='coerce')
+        
+        return df
+    except Exception as e:
+        raise ValueError(f"Error parsing log file: {str(e)}")
 
 def generate_summary(df):
-    if 'sc-status' not in df.columns or 'time-taken' not in df.columns:
-        raise ValueError("Required columns not found in log data")
-    
-    summary = df.groupby('sc-status').agg(
-        count=('sc-status', 'size'),
-        avg_time_taken=('time-taken', 'mean'),
-        max_time_taken=('time-taken', 'max'),
-        min_time_taken=('time-taken', 'min')
-    ).reset_index()
-    
-    summary.columns = ['sc_status', 'count', 'avg_time_taken', 'max_time_taken', 'min_time_taken']
-    return summary
+    try:
+        if 'sc-status' not in df.columns or 'time-taken' not in df.columns:
+            raise ValueError("Required columns 'sc-status' or 'time-taken' not found in log data")
+        
+        summary = df.groupby('sc-status').agg(
+            count=('sc-status', 'size'),
+            avg_time_taken=('time-taken', 'mean'),
+            max_time_taken=('time-taken', 'max'),
+            min_time_taken=('time-taken', 'min')
+        ).reset_index()
+        
+        summary.columns = ['sc_status', 'count', 'avg_time_taken', 'max_time_taken', 'min_time_taken']
+        return summary
+    except Exception as e:
+        raise ValueError(f"Error generating summary: {str(e)}")
 
 def create_xlsx(summary_df, raw_df):
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        summary_df.to_excel(writer, sheet_name='StatusSummary', index=False)
-        raw_df.to_excel(writer, sheet_name='RawData', index=False)
-    output.seek(0)
-    return output
+    try:
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            summary_df.to_excel(writer, sheet_name='StatusSummary', index=False)
+            raw_df.to_excel(writer, sheet_name='RawData', index=False)
+        output.seek(0)
+        return output
+    except Exception as e:
+        raise ValueError(f"Error creating XLSX file: {str(e)}")
 
 st.title("IIS Log to XLSX Converter")
 
@@ -70,7 +86,7 @@ if uploaded_file:
         
         xlsx_output = create_xlsx(summary_df, raw_df)
         
-        st.success("Processing complete!")
+        st.success("File processed successfully!")
         
         st.download_button(
             label="Download XLSX",
