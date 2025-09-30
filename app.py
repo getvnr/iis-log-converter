@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 from io import BytesIO
-import altair as alt  # For advanced charts
+import altair as alt
 import re
 
 # Ensure openpyxl is available
@@ -38,6 +38,10 @@ def parse_iis_log(file_content):
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce')
         
+        # Convert time-taken from milliseconds to seconds
+        if 'time-taken' in df.columns:
+            df['time-taken'] = df['time-taken'] / 1000.0  # Convert ms to seconds
+        
         # Combine date and time into datetime if present
         if 'date' in df.columns and 'time' in df.columns:
             df['datetime'] = pd.to_datetime(df['date'] + ' ' + df['time'], errors='coerce')
@@ -58,7 +62,7 @@ def generate_summary(df):
             min_time_taken=('time-taken', 'min')
         ).reset_index()
         
-        summary.columns = ['sc_status', 'count', 'avg_time_taken', 'max_time_taken', 'min_time_taken']
+        summary.columns = ['sc_status', 'count', 'avg_time_taken (sec)', 'max_time_taken (sec)', 'min_time_taken (sec)']
         return summary
     except Exception as e:
         raise ValueError(f"Error generating summary: {str(e)}")
@@ -74,6 +78,7 @@ def create_pivot_table(df):
             fill_value=0
         )
         pivot.columns = ['_'.join(map(str, col)) for col in pivot.columns]
+        pivot.columns = [col.replace('mean', 'mean (sec)').replace('max', 'max (sec)') for col in pivot.columns]
         return pivot.reset_index()
     return None
 
@@ -85,6 +90,7 @@ def get_error_apps(df):
             avg_time=('time-taken', 'mean'),
             max_time=('time-taken', 'max')
         ).reset_index()
+        error_summary.columns = ['cs-uri-stem', 'error_count', 'avg_time (sec)', 'max_time (sec)']
         return error_summary
     return None
 
@@ -104,6 +110,14 @@ def create_xlsx(summary_df, raw_df, pivot_df=None, error_df=None):
         raise ValueError(f"Error creating XLSX file: {str(e)}")
 
 st.title("IIS Log Analyzer with Visualizations")
+
+# Developer and Hosted Date
+st.markdown("""
+    <div style='text-align: center; padding: 10px;'>
+        <p>Developed by: <b>Lakshmi Narayana Rao</b></p>
+        <p>Hosted on: <b>September 30, 2025</b></p>
+    </div>
+""", unsafe_allow_html=True)
 
 uploaded_file = st.file_uploader("Upload IIS .log file", type=["log"])
 
@@ -140,8 +154,9 @@ if uploaded_file:
         else:
             st.info("No errors found in the logs.")
         
-        # Charts and Timelines
+        # Visualizations with Custom Colors
         st.subheader("Visualizations")
+        color_scale = alt.Scale(domain=['200', '500'], range=['#1f77b4', '#ff3333'])  # Vibrant blue for 200, red for 500
         
         # Bar Chart: Status Code Counts
         if 'sc-status' in raw_df.columns:
@@ -150,37 +165,43 @@ if uploaded_file:
             bar_chart = alt.Chart(status_counts).mark_bar().encode(
                 x='Status:O',
                 y='Count:Q',
-                color='Status:O',
+                color=alt.Color('Status:O', scale=color_scale),
                 tooltip=['Status', 'Count']
-            ).properties(title="Status Code Distribution")
+            ).properties(title="Status Code Distribution", width=400).configure_axis(
+                labelFontSize=12, titleFontSize=14
+            ).configure_title(fontSize=16, color='#333')
             st.altair_chart(bar_chart, use_container_width=True)
         
         # Timeline: Requests Over Time
         if 'datetime' in raw_df.columns:
-            raw_df['hour'] = raw_df['datetime'].dt.floor('H')  # Group by hour for timeline
+            raw_df['hour'] = raw_df['datetime'].dt.floor('H')
             timeline_data = raw_df.groupby('hour').size().reset_index(name='Request Count')
-            line_chart = alt.Chart(timeline_data).mark_line().encode(
+            line_chart = alt.Chart(timeline_data).mark_line(color='#2ca02c').encode(  # Vibrant green
                 x='hour:T',
                 y='Request Count:Q',
                 tooltip=['hour', 'Request Count']
-            ).properties(title="Requests Timeline (Hourly)")
+            ).properties(title="Requests Timeline (Hourly)", width=600).configure_axis(
+                labelFontSize=12, titleFontSize=14
+            ).configure_title(fontSize=16, color='#333')
             st.altair_chart(line_chart, use_container_width=True)
         
-        # Scatter Plot: Time Taken vs Time (for Errors)
+        # Scatter Plot: Error Response Times
         if 'datetime' in raw_df.columns and 'time-taken' in raw_df.columns:
             errors = raw_df[raw_df['sc-status'] >= 500]
             if not errors.empty:
                 scatter = alt.Chart(errors).mark_circle().encode(
                     x='datetime:T',
                     y='time-taken:Q',
-                    color='sc-status:O',
+                    color=alt.Color('sc-status:O', scale=color_scale),
                     tooltip=['datetime', 'time-taken', 'cs-uri-stem', 'sc-status']
-                ).properties(title="Error Response Times Timeline")
+                ).properties(title="Error Response Times Timeline (sec)", width=600).configure_axis(
+                    labelFontSize=12, titleFontSize=14
+                ).configure_title(fontSize=16, color='#333')
                 st.altair_chart(scatter, use_container_width=True)
             else:
                 st.info("No errors to plot.")
         
-        # Preview Sections (as before)
+        # Preview Sections
         st.subheader("Preview of Status Summary")
         st.dataframe(summary_df)
         
