@@ -205,8 +205,15 @@ if uploaded_file:
         st.subheader("Preview of Status Summary")
         st.dataframe(summary_df)
         
-        st.subheader("Preview of Raw Data (first 10 rows)")
-        st.dataframe(raw_df.head(10))
+        st.subheader("Preview of Raw Data (first 50 rows with errors, status >= 500)")
+        if 'sc-status' in raw_df.columns:
+            error_rows = raw_df[raw_df['sc-status'] >= 500].head(50)
+            if not error_rows.empty:
+                st.dataframe(error_rows)
+            else:
+                st.info("No error rows (status >= 500) found in the log.")
+        else:
+            st.info("No status column found in the log.")
         
     except Exception as e:
         st.error(f"Error processing file: {str(e)}")
